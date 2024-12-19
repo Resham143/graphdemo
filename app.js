@@ -1,152 +1,166 @@
-// function sayHello(name)
-// {
-//     console.log('Hello '+name);
-// }
-
-// sayHello('Resham');
-
 const http = require('http');
 const express = require('express');
 const neo4j = require('neo4j-driver');
 const { error } = require('console');
+const NodeCache = require('node-cache')
+
+const myCache = new NodeCache();
+var app = express();
+
+
 const driver = neo4j.driver('neo4j+s://0ba5e2d5.databases.neo4j.io',
     neo4j.auth.basic('neo4j', '7sf3wQH8flXIZ54ursTnD53i8KUuPqjjHNiutBgruIw'));
 
-
-var app = express();
-
 const session = driver.session();
+const sessionId = '1734515381255_session';
 
-const sessionId = 'n:Screen{transId:1734514097168_session';
 app.get('/graph/landing', (req, res) => {
     console.log('start');
-    session.executeRead((tx) =>
-        tx.run('MATCH (n:Screen{transId:"1734515381255_session"}) RETURN n limit 1')
-        //
-    )
-        .then(result => {
-            console.log('success');
-            const item = result.records[0]._fields[0].properties;
+    const cacheKey = `${sessionId}_landing`
+    if (myCache.has(cacheKey)) {
 
-            getTransactionsByPageId(item.nodeIndex).then(result1 => {
+        res.send({
+            "data": myCache.get(cacheKey),
+            "status": "success",
+            "code": 0
+        });
+    }
+    else {
+        session.executeRead((tx) =>
+            tx.run(`MATCH (n:Screen{transId:"${sessionId}"}) RETURN n ORDER BY n.nodeIndex limit 1`))
+            .then(result => {
+                console.log('success');
+                const item = result.records[0]._fields[0].properties;
 
-                item["transactions"] = result1;
+                getTransactionsByPageId(item.nodeIndex).then(result1 => {
 
-                res.send({
-                    "data": item,
-                    "status": "success",
-                    "code": 200
+                    item["transactions"] = result1;
+
+                    myCache.set(cacheKey, item);
+
+                    res.send({
+                        "data": item,
+                        "status": "success",
+                        "code": 0
+                    });
+                }).catch(error => {
+
+                    console.log('error second step');
+                    res.send({
+                        "data": item,
+                        "status": "success",
+                        "code": 0
+                    });
                 });
-            }).catch(error => {
 
-                console.log('error second step');
+            })
+            .catch(error => {
+                console.log('failed');
+                res.send({
+                    "data": null,
+                    "status": "failed",
+                    "code": 1
+                });
             });
+    }
 
-        })
-        .catch(error => {
-            console.log('failed');
-            res.send(error);
-        });
-});
-
-app.get('/graph/all', (req, res) => {
-    console.log('start');
-    session.executeRead((tx) =>
-        tx.run('MATCH (n:Screen{transId:"1734515381255_session"}) RETURN n')
-        //
-    )
-        .then(result => {
-            console.log('success');
-            const list = []; result.records.map(record => {
-                list.push((record._fields[0]))
-                //.segments[0]
-            });
-            res.send(list);
-        })
-        .catch(error => {
-            console.log('failed');
-            res.send(error);
-        });
 });
 
 app.get('/graph/screen/:nodeId', (req, res) => {
     console.log('start');
+    const cacheKey = `${sessionId}_screen_${req.params.nodeId}`;
+    if (myCache.has(cacheKey)) {
+        res.send({
+            "data": myCache.get(cacheKey),
+            "status": "success",
+            "code": 0
+        });
+    }
+    else {
+        session.executeRead((tx) =>
+            tx.run(`MATCH (n:Screen{nodeIndex:${req.params.nodeId},transId:"${sessionId}"}) RETURN n ORDER BY n.nodeIndex limit 1`))
+            .then(result => {
+                console.log('success');
+                const item = result.records[0]._fields[0].properties;
 
-    session.executeRead((tx) =>
-        tx.run(`MATCH (n:Screen{nodeIndex:${req.params.nodeId},transId:"1734515381255_session"}) RETURN n limit 1`)
-        //
-    )
-        .then(result => {
-            console.log('success');
-            const item = result.records[0]._fields[0].properties;
+                getTransactionsByPageId(item.nodeIndex).then(result1 => {
 
-            getTransactionsByPageId(item.nodeIndex).then(result1 => {
+                    item["transactions"] = result1;
 
-                item["transactions"] = result1;
+                    myCache.set(cacheKey, item);
+
+                    res.send({
+                        "data": item,
+                        "status": "success",
+                        "code": 0
+                    });
+                }).catch(error => {
+
+                    res.send({
+                        "data": item,
+                        "status": "success",
+                        "code": 0
+                    });
+                });
+
+            })
+            .catch(error => {
+                console.log('failed');
+                res.send({
+                    "data": null,
+                    "status": "failed",
+                    "code": 1
+                });
+            });
+    }
+});
+
+app.get('/graph/all', (req, res) => {
+    console.log('start');
+    const cacheKey = `${sessionId}_graph_all`
+    if(myCache.has(cacheKey))
+    {
+        res.send({
+            "data": myCache.get(cacheKey),
+            "message": "success",
+            "statue": 0
+        });
+    }
+    else
+    {
+        session.executeRead((tx) =>
+            tx.run(`MATCH (n:Screen{transId:"${sessionId}"}) RETURN n ORDER BY n.nodeIndex`)
+        )
+            .then(result => {
+                console.log('success');
+                const list = [];
+    
+                result.records.map(record => {
+    
+                    list.push(record._fields[0].properties)
+    
+                })
+    
+                myCache.set(cacheKey,list);
 
                 res.send({
-                    "data": item,
-                    "status": "success",
-                    "code": 200
+                    "data": list,
+                    "message": "success",
+                    "statue": 0
                 });
-            }).catch(error => {
-
-                console.log('error second step');
+    
+            })
+            .catch(error => {
+                console.log('failed');
+                res.send({
+                    "data": null,
+                    "message": "failed",
+                    "statue": 1
+                });
             });
-
-        })
-        .catch(error => {
-            console.log('failed');
-            res.send(error);
-        });
+    }
+    
 });
-
-app.get('/graph/transactions', (req, res) => {
-    console.log('start');
-
-    session.executeRead((tx) =>
-        tx.run(`MATCH (${sessionId}) RETURN DISTINCT n.nodeIndex`)
-    )
-        .then(result => {
-            console.log('success');
-            // const list = []
-            // result.records.map(record => {
-            //     list.push((record._fields[0]).segments[0].relationship.type)
-            // });
-            res.send(result);
-        })
-        .catch(error => {
-            console.log('failed');
-            res.send(error);
-        });
-});
-
-app.get('/graph/screens/all', (req, res) => {
-
-    console.log('start');
-    session.executeRead((tx) =>
-        tx.run(`MATCH (${sessionId}) RETURN n`)
-    )
-        .then(result => {
-            console.log('success');
-            const list = []
-            result.records.map(record => {
-                list.push((record._fields[0]).properties)
-            });
-            res.send(list);
-        })
-        .catch(error => {
-            console.log('failed');
-            res.send(error);
-        });
-});
-
-
-
-app.get('/graph/sourceid/:sourceId', (req, res) => {
-    res.send(req.params.sourceId);
-})
-
 
 async function getTransactionsByPageId(id) {
 

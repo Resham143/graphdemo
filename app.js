@@ -30,11 +30,15 @@ app.get('/graph/landing', (req, res) => {
             tx.run(`MATCH (n:Screen{transId:"${sessionId}"}) RETURN n ORDER BY n.nodeIndex limit 1`))
             .then(result => {
                 console.log('success');
-                const item = result.records[0]._fields[0].properties;
+
+                const item = getElementId(result.records[0]._fields[0].properties);
 
                 getTransactionsByPageId(item.nodeIndex).then(result1 => {
 
+
+
                     item["transactions"] = result1;
+
 
                     myCache.set(cacheKey, item);
 
@@ -68,7 +72,9 @@ app.get('/graph/landing', (req, res) => {
 
 app.get('/graph/screen/:nodeId', (req, res) => {
     console.log('start');
-    const cacheKey = `${sessionId}_screen_${req.params.nodeId}`;
+    var cacheKey = `${sessionId}_screen_${req.params.nodeId}`;
+    var nextIndex = parseInt(req.params.nodeId) + 1;
+
     if (myCache.has(cacheKey)) {
         res.send({
             "data": myCache.get(cacheKey),
@@ -81,7 +87,8 @@ app.get('/graph/screen/:nodeId', (req, res) => {
             tx.run(`MATCH (n:Screen{nodeIndex:${req.params.nodeId},transId:"${sessionId}"}) RETURN n ORDER BY n.nodeIndex limit 1`))
             .then(result => {
                 console.log('success');
-                const item = result.records[0]._fields[0].properties;
+
+                const item = getElementId(result.records[0]._fields[0].properties);
 
                 getTransactionsByPageId(item.nodeIndex).then(result1 => {
 
@@ -96,6 +103,8 @@ app.get('/graph/screen/:nodeId', (req, res) => {
                     });
                 }).catch(error => {
 
+                    console.log(error);
+
                     res.send({
                         "data": item,
                         "status": "success",
@@ -105,12 +114,61 @@ app.get('/graph/screen/:nodeId', (req, res) => {
 
             })
             .catch(error => {
+
                 console.log('failed');
-                res.send({
-                    "data": null,
-                    "status": "failed",
-                    "code": 1
-                });
+
+                cacheKey = `${sessionId}_screen_${nextIndex}`;
+
+                if (myCache.has(cacheKey)) {
+                    res.send({
+                        "data": myCache.get(cacheKey),
+                        "status": "success",
+                        "code": 0
+                    });
+                }
+                else {
+                    session.executeRead((tx) =>
+                        tx.run(`MATCH (n:Screen{nodeIndex:${nextIndex},transId:"${sessionId}"}) RETURN n ORDER BY n.nodeIndex limit 1`))
+                        .then(result => {
+                            console.log('success');
+
+                            const item = getElementId(result.records[0]._fields[0].properties);
+
+                            getTransactionsByPageId(item.nodeIndex).then(result1 => {
+
+                                item["transactions"] = result1;
+
+                                myCache.set(cacheKey, item);
+
+                                res.send({
+                                    "data": item,
+                                    "status": "success",
+                                    "code": 0
+                                });
+                            }).catch(error => {
+
+                                console.log(error);
+
+                                res.send({
+                                    "data": item,
+                                    "status": "success",
+                                    "code": 0
+                                });
+                            });
+
+                        })
+                        .catch(error => {
+
+                            console.log('failed');
+
+                            res.send({
+                                "data": null,
+                                "status": "failed",
+                                "code": 1
+                            });
+                        });
+                }
+
             });
     }
 });
@@ -118,37 +176,35 @@ app.get('/graph/screen/:nodeId', (req, res) => {
 app.get('/graph/all', (req, res) => {
     console.log('start');
     const cacheKey = `${sessionId}_graph_all`
-    if(myCache.has(cacheKey))
-    {
+    if (myCache.has(cacheKey)) {
         res.send({
             "data": myCache.get(cacheKey),
             "message": "success",
             "statue": 0
         });
     }
-    else
-    {
+    else {
         session.executeRead((tx) =>
             tx.run(`MATCH (n:Screen{transId:"${sessionId}"}) RETURN n ORDER BY n.nodeIndex`)
         )
             .then(result => {
                 console.log('success');
                 const list = [];
-    
+
                 result.records.map(record => {
-    
+
                     list.push(record._fields[0].properties)
-    
+
                 })
-    
-                myCache.set(cacheKey,list);
+
+                myCache.set(cacheKey, list);
 
                 res.send({
                     "data": list,
                     "message": "success",
                     "statue": 0
                 });
-    
+
             })
             .catch(error => {
                 console.log('failed');
@@ -159,7 +215,7 @@ app.get('/graph/all', (req, res) => {
                 });
             });
     }
-    
+
 });
 
 async function getTransactionsByPageId(id) {
@@ -172,11 +228,16 @@ async function getTransactionsByPageId(id) {
         .then(result => {
             console.log('success 2');
             const list = []
-            result.records.map(record => {
+            var sortedList = result.records.sort(function (a, b) {
+                return a._fields[0].segments[0].end.properties.nodeIndex - b._fields[0].segments[0].end.properties.nodeIndex
+            })
+            sortedList.map(record => {
+
+
                 list.push({
-                    "start": record._fields[0].segments[0].start.properties,
-                    "end": record._fields[0].segments[0].end.properties,
-                    "relationship": record._fields[0].segments[0].relationship.properties
+                    "start": getElementId(record._fields[0].segments[0].start.properties),
+                    "end": getElementId(record._fields[0].segments[0].end.properties),
+                    "relationship": getElementId(record._fields[0].segments[0].relationship.properties)
                 })
 
             });
@@ -189,6 +250,17 @@ async function getTransactionsByPageId(id) {
 
 }
 
+function getElementId(item) {
+
+    var widgetType = item.elementId.split('_')[0];
+    var widgetIdList = item.elementId.split('/');
+    var widgetId = widgetIdList[widgetIdList.length - 1];
+
+    item["widgetType"] = widgetType;
+    item["id"] = widgetId;
+
+    return item;
+}
 const port = process.env.PORT || 3000
 app.listen(port, () => console.log(`app listening to ${port}`));
 
